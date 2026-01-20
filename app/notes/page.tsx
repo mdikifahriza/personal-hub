@@ -43,13 +43,19 @@ export default function NotesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedForm, setExpandedForm] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [showColorPicker, setShowColorPicker] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     title: '',
     content: '',
     color: null as string | null,
+  });
+
+  // State terpisah untuk form edit
+  const [editForm, setEditForm] = useState({
+    title: '',
+    content: '',
   });
 
   useEffect(() => {
@@ -103,7 +109,7 @@ export default function NotesPage() {
 
       if (res.ok) {
         loadNotes();
-        setEditingNote(null);
+        setEditingNoteId(null);
       }
     } catch (error) {
       console.error('Error updating note:', error);
@@ -134,12 +140,29 @@ export default function NotesPage() {
     setShowColorPicker(null);
   };
 
+  const startEditing = (note: Note) => {
+    setEditingNoteId(note.id);
+    setEditForm({
+      title: note.title,
+      content: note.content,
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingNoteId(null);
+    setEditForm({ title: '', content: '' });
+  };
+
+  const saveEdit = (noteId: string) => {
+    updateNote(noteId, editForm);
+  };
+
   const pinnedNotes = notes.filter((n) => n.is_pinned && !n.is_archived);
   const otherNotes = notes.filter((n) => !n.is_pinned && !n.is_archived);
 
   const NoteCard = ({ note }: { note: Note }) => {
     const colorData = COLORS.find((c) => c.value === note.color) || COLORS[0];
-    const isEditing = editingNote?.id === note.id;
+    const isEditing = editingNoteId === note.id;
 
     return (
       <div
@@ -150,17 +173,17 @@ export default function NotesPage() {
           <div className="space-y-3">
             <input
               type="text"
-              value={editingNote.title}
+              value={editForm.title}
               onChange={(e) =>
-                setEditingNote({ ...editingNote, title: e.target.value })
+                setEditForm({ ...editForm, title: e.target.value })
               }
               className="w-full px-3 py-2 bg-white/50 border border-gray-300 rounded text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gray-900"
               placeholder="Judul"
             />
             <textarea
-              value={editingNote.content}
+              value={editForm.content}
               onChange={(e) =>
-                setEditingNote({ ...editingNote, content: e.target.value })
+                setEditForm({ ...editForm, content: e.target.value })
               }
               className="w-full px-3 py-2 bg-white/50 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               rows={4}
@@ -168,13 +191,13 @@ export default function NotesPage() {
             />
             <div className="flex gap-2">
               <button
-                onClick={() => updateNote(editingNote.id, editingNote)}
+                onClick={() => saveEdit(note.id)}
                 className="flex-1 px-3 py-1.5 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-800"
               >
                 Simpan
               </button>
               <button
-                onClick={() => setEditingNote(null)}
+                onClick={cancelEditing}
                 className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50"
               >
                 Batal
@@ -184,7 +207,7 @@ export default function NotesPage() {
         ) : (
           <>
             <div
-              onClick={() => setEditingNote(note)}
+              onClick={() => startEditing(note)}
               className="cursor-pointer mb-3"
             >
               {note.title && (
