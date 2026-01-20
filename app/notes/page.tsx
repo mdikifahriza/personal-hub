@@ -11,6 +11,8 @@ import {
   Search,
   X,
   ArchiveRestore,
+  Edit3,
+  Eye,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -43,8 +45,9 @@ export default function NotesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedForm, setExpandedForm] = useState(false);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [showColorPicker, setShowColorPicker] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'view' | 'edit'>('list');
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -52,7 +55,6 @@ export default function NotesPage() {
     color: null as string | null,
   });
 
-  // State terpisah untuk form edit
   const [editForm, setEditForm] = useState({
     title: '',
     content: '',
@@ -109,7 +111,8 @@ export default function NotesPage() {
 
       if (res.ok) {
         loadNotes();
-        setEditingNoteId(null);
+        setViewMode('list');
+        setSelectedNote(null);
       }
     } catch (error) {
       console.error('Error updating note:', error);
@@ -121,7 +124,11 @@ export default function NotesPage() {
 
     try {
       const res = await fetch(`/api/notes?id=${id}`, { method: 'DELETE' });
-      if (res.ok) loadNotes();
+      if (res.ok) {
+        loadNotes();
+        setViewMode('list');
+        setSelectedNote(null);
+      }
     } catch (error) {
       console.error('Error deleting note:', error);
     }
@@ -140,21 +147,38 @@ export default function NotesPage() {
     setShowColorPicker(null);
   };
 
-  const startEditing = (note: Note) => {
-    setEditingNoteId(note.id);
+  const openViewMode = (note: Note) => {
+    setSelectedNote(note);
+    setViewMode('view');
+  };
+
+  const openEditMode = (note: Note) => {
+    setSelectedNote(note);
     setEditForm({
       title: note.title,
       content: note.content,
     });
+    setViewMode('edit');
   };
 
-  const cancelEditing = () => {
-    setEditingNoteId(null);
+  const saveEdit = () => {
+    if (selectedNote) {
+      updateNote(selectedNote.id, editForm);
+    }
+  };
+
+  const closeModal = () => {
+    setViewMode('list');
+    setSelectedNote(null);
     setEditForm({ title: '', content: '' });
   };
 
-  const saveEdit = (noteId: string) => {
-    updateNote(noteId, editForm);
+  const truncateContent = (content: string, maxLines: number = 15) => {
+    const lines = content.split('\n');
+    if (lines.length > maxLines) {
+      return lines.slice(0, maxLines).join('\n') + '...';
+    }
+    return content;
   };
 
   const pinnedNotes = notes.filter((n) => n.is_pinned && !n.is_archived);
@@ -162,135 +186,97 @@ export default function NotesPage() {
 
   const NoteCard = ({ note }: { note: Note }) => {
     const colorData = COLORS.find((c) => c.value === note.color) || COLORS[0];
-    const isEditing = editingNoteId === note.id;
+    const displayContent = truncateContent(note.content, 15);
+    const isTruncated = displayContent !== note.content;
 
     return (
       <div
         className={`rounded-lg border p-4 transition-all hover:shadow-md ${colorData.bg} ${colorData.border}`}
         style={note.color ? { backgroundColor: note.color } : {}}
       >
-        {isEditing ? (
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={editForm.title}
-              onChange={(e) =>
-                setEditForm({ ...editForm, title: e.target.value })
-              }
-              className="w-full px-3 py-2 bg-white/50 border border-gray-300 rounded text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gray-900"
-              placeholder="Judul"
-            />
-            <textarea
-              value={editForm.content}
-              onChange={(e) =>
-                setEditForm({ ...editForm, content: e.target.value })
-              }
-              className="w-full px-3 py-2 bg-white/50 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              rows={4}
-              placeholder="Catatan"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => saveEdit(note.id)}
-                className="flex-1 px-3 py-1.5 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-800"
-              >
-                Simpan
-              </button>
-              <button
-                onClick={cancelEditing}
-                className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50"
-              >
-                Batal
-              </button>
+        <div
+          onClick={() => openViewMode(note)}
+          className="cursor-pointer mb-3"
+        >
+          {note.title && (
+            <h3 className="font-semibold text-gray-900 mb-2">
+              {note.title}
+            </h3>
+          )}
+          <p className="text-sm text-gray-700 whitespace-pre-wrap">
+            {displayContent}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+          <span>{format(new Date(note.updated_at), 'dd MMM yyyy')}</span>
+        </div>
+
+        <div className="flex items-center gap-1 relative">
+          <button
+            onClick={() => togglePin(note)}
+            className={`p-1.5 rounded hover:bg-black/5 transition-colors ${
+              note.is_pinned ? 'text-gray-900' : 'text-gray-500'
+            }`}
+            title={note.is_pinned ? 'Unpin' : 'Pin'}
+          >
+            <Pin size={16} fill={note.is_pinned ? 'currentColor' : 'none'} />
+          </button>
+
+          <button
+            onClick={() =>
+              setShowColorPicker(
+                showColorPicker === note.id ? null : note.id
+              )
+            }
+            className="p-1.5 rounded hover:bg-black/5 text-gray-500 transition-colors"
+            title="Ubah warna"
+          >
+            <Palette size={16} />
+          </button>
+
+          {showColorPicker === note.id && (
+            <div className="absolute left-0 top-8 bg-white rounded-lg shadow-lg border border-gray-200 p-2 z-10 flex gap-1.5">
+              {COLORS.map((color) => (
+                <button
+                  key={color.name}
+                  onClick={() => updateColor(note.id, color.value)}
+                  className={`w-7 h-7 rounded-full border-2 hover:scale-110 transition-transform ${
+                    color.value === note.color
+                      ? 'border-gray-900'
+                      : 'border-gray-300'
+                  }`}
+                  style={
+                    color.value
+                      ? { backgroundColor: color.value }
+                      : { backgroundColor: '#fff' }
+                  }
+                  title={color.name}
+                />
+              ))}
             </div>
-          </div>
-        ) : (
-          <>
-            <div
-              onClick={() => startEditing(note)}
-              className="cursor-pointer mb-3"
-            >
-              {note.title && (
-                <h3 className="font-semibold text-gray-900 mb-2">
-                  {note.title}
-                </h3>
-              )}
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                {note.content}
-              </p>
-            </div>
+          )}
 
-            <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-              <span>{format(new Date(note.updated_at), 'dd MMM yyyy')}</span>
-            </div>
+          <button
+            onClick={() => toggleArchive(note)}
+            className="p-1.5 rounded hover:bg-black/5 text-gray-500 transition-colors"
+            title={note.is_archived ? 'Unarchive' : 'Archive'}
+          >
+            {note.is_archived ? (
+              <ArchiveRestore size={16} />
+            ) : (
+              <Archive size={16} />
+            )}
+          </button>
 
-            <div className="flex items-center gap-1 relative">
-              <button
-                onClick={() => togglePin(note)}
-                className={`p-1.5 rounded hover:bg-black/5 transition-colors ${
-                  note.is_pinned ? 'text-gray-900' : 'text-gray-500'
-                }`}
-                title={note.is_pinned ? 'Unpin' : 'Pin'}
-              >
-                <Pin size={16} fill={note.is_pinned ? 'currentColor' : 'none'} />
-              </button>
-
-              <button
-                onClick={() =>
-                  setShowColorPicker(
-                    showColorPicker === note.id ? null : note.id
-                  )
-                }
-                className="p-1.5 rounded hover:bg-black/5 text-gray-500 transition-colors"
-                title="Ubah warna"
-              >
-                <Palette size={16} />
-              </button>
-
-              {showColorPicker === note.id && (
-                <div className="absolute left-0 top-8 bg-white rounded-lg shadow-lg border border-gray-200 p-2 z-10 flex gap-1.5">
-                  {COLORS.map((color) => (
-                    <button
-                      key={color.name}
-                      onClick={() => updateColor(note.id, color.value)}
-                      className={`w-7 h-7 rounded-full border-2 hover:scale-110 transition-transform ${
-                        color.value === note.color
-                          ? 'border-gray-900'
-                          : 'border-gray-300'
-                      }`}
-                      style={
-                        color.value
-                          ? { backgroundColor: color.value }
-                          : { backgroundColor: '#fff' }
-                      }
-                      title={color.name}
-                    />
-                  ))}
-                </div>
-              )}
-
-              <button
-                onClick={() => toggleArchive(note)}
-                className="p-1.5 rounded hover:bg-black/5 text-gray-500 transition-colors"
-                title={note.is_archived ? 'Unarchive' : 'Archive'}
-              >
-                {note.is_archived ? (
-                  <ArchiveRestore size={16} />
-                ) : (
-                  <Archive size={16} />
-                )}
-              </button>
-
-              <button
-                onClick={() => deleteNote(note.id)}
-                className="p-1.5 rounded hover:bg-black/5 text-red-600 transition-colors ml-auto"
-                title="Hapus"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          </>
-        )}
+          <button
+            onClick={() => deleteNote(note.id)}
+            className="p-1.5 rounded hover:bg-black/5 text-red-600 transition-colors ml-auto"
+            title="Hapus"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
     );
   };
@@ -489,6 +475,110 @@ export default function NotesPage() {
           )}
         </div>
       </main>
+
+      {/* View/Edit Modal */}
+      {(viewMode === 'view' || viewMode === 'edit') && selectedNote && (
+        <div 
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={closeModal}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden"
+            style={selectedNote.color ? { backgroundColor: selectedNote.color } : {}}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                {viewMode === 'view' ? (
+                  <Eye size={20} className="text-gray-600" />
+                ) : (
+                  <Edit3 size={20} className="text-gray-600" />
+                )}
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {viewMode === 'view' ? 'Lihat Catatan' : 'Edit Catatan'}
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                {viewMode === 'view' && (
+                  <button
+                    onClick={() => openEditMode(selectedNote)}
+                    className="p-2 rounded hover:bg-black/5 text-gray-600 transition-colors"
+                    title="Edit"
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                )}
+                <button
+                  onClick={closeModal}
+                  className="p-2 rounded hover:bg-black/5 text-gray-600 transition-colors"
+                  title="Tutup"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+              {viewMode === 'view' ? (
+                <div className="space-y-4">
+                  {selectedNote.title && (
+                    <h1 className="text-2xl font-bold text-gray-900">
+                      {selectedNote.title}
+                    </h1>
+                  )}
+                  <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                    {selectedNote.content}
+                  </p>
+                  <div className="text-sm text-gray-500 pt-4 border-t border-gray-200">
+                    Terakhir diubah: {format(new Date(selectedNote.updated_at), 'dd MMM yyyy, HH:mm')}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <input
+                    type="text"
+                    value={editForm.title}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, title: e.target.value })
+                    }
+                    placeholder="Judul"
+                    className="w-full px-4 py-3 bg-white/50 border border-gray-300 rounded-lg text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  />
+                  <textarea
+                    value={editForm.content}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, content: e.target.value })
+                    }
+                    placeholder="Catatan"
+                    rows={15}
+                    className="w-full px-4 py-3 bg-white/50 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            {viewMode === 'edit' && (
+              <div className="flex justify-end gap-3 p-4 border-t border-gray-200">
+                <button
+                  onClick={closeModal}
+                  className="px-6 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={saveEdit}
+                  className="px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
