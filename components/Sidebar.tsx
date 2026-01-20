@@ -65,7 +65,7 @@ export default function Sidebar() {
       >
         {/* Header */}
         <div className="h-16 border-b border-gray-100 flex items-center px-6">
-          <h1 className="text-lg font-semibold text-gray-900">Personal Hub</h1>
+          <h1 className="text-lg font-semibold text-gray-900">Catatan Pengemis</h1>
         </div>
 
         {/* Navigation */}
@@ -109,4 +109,5 @@ export default function Sidebar() {
       <div className="hidden lg:block w-64" />
     </>
   );
+
 }
