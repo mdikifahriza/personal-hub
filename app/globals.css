@@ -1,0 +1,241 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f8fc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --border: #dbe3ef;
+  --border-strong: #cbd5e1;
+  --muted: #475569;
+  --muted-soft: #64748b;
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --focus: #93c5fd;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --background: #0b1220;
+  --foreground: #e2e8f0;
+  --surface: #111a2b;
+  --surface-2: #162135;
+  --surface-3: #1b2a44;
+  --border: #24344f;
+  --border-strong: #334155;
+  --muted: #cbd5e1;
+  --muted-soft: #94a3b8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --focus: #60a5fa;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 15%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 38%),
+    radial-gradient(circle at 88% 0%, color-mix(in oklab, var(--accent) 18%, transparent), transparent 42%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
+  transition: background-color 220ms ease, color 220ms ease;
+}
+
+a,
+button {
+  touch-action: manipulation;
+}
+
+:where(h1, h2, h3, h4, h5, h6, p, span, label, td, th) {
+  overflow-wrap: anywhere;
+}
+
+input,
+select,
+textarea {
+  color: var(--foreground);
+  background-color: var(--surface);
+  border-color: var(--border-strong);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted-soft);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--focus) 34%, transparent);
+}
+
+select option {
+  background-color: var(--surface);
+  color: var(--foreground);
+}
+
+[data-theme='dark'] .bg-white {
+  background-color: var(--surface) !important;
+}
+
+[data-theme='dark'] .bg-gray-50 {
+  background-color: var(--surface-2) !important;
+}
+
+[data-theme='dark'] .bg-gray-100 {
+  background-color: var(--surface-3) !important;
+}
+
+[data-theme='dark'] .bg-gray-200 {
+  background-color: color-mix(in oklab, var(--surface-3) 74%, #ffffff 26%) !important;
+}
+
+[data-theme='dark'] .bg-gray-900 {
+  background-color: var(--accent) !important;
+}
+
+[data-theme='dark'] .hover\:bg-gray-800:hover {
+  background-color: var(--accent-hover) !important;
+}
+
+[data-theme='dark'] .bg-white\/50 {
+  background-color: color-mix(in oklab, var(--surface) 85%, transparent) !important;
+}
+
+[data-theme='dark'] .text-gray-900 {
+  color: var(--foreground) !important;
+}
+
+[data-theme='dark'] .text-gray-700,
+[data-theme='dark'] .text-gray-600,
+[data-theme='dark'] .text-gray-500,
+[data-theme='dark'] .text-gray-400 {
+  color: var(--muted) !important;
+}
+
+[data-theme='dark'] .hover\:text-gray-900:hover {
+  color: var(--foreground) !important;
+}
+
+[data-theme='dark'] .border-gray-100,
+[data-theme='dark'] .border-gray-200 {
+  border-color: var(--border) !important;
+}
+
+[data-theme='dark'] .border-gray-300 {
+  border-color: var(--border-strong) !important;
+}
+
+[data-theme='dark'] .hover\:bg-gray-50:hover,
+[data-theme='dark'] .hover\:bg-black\/5:hover {
+  background-color: color-mix(in oklab, var(--surface-2) 65%, #ffffff 35%) !important;
+}
+
+[data-theme='dark'] .focus\:ring-gray-900:focus {
+  --tw-ring-color: color-mix(in oklab, var(--focus) 58%, transparent) !important;
+}
+
+[data-theme='dark'] .focus\:border-transparent:focus {
+  border-color: transparent !important;
+}
+
+[data-theme='dark'] .bg-red-50 {
+  background-color: #381417 !important;
+}
+
+[data-theme='dark'] .bg-green-50 {
+  background-color: #103025 !important;
+}
+
+[data-theme='dark'] .bg-yellow-50 {
+  background-color: #382f12 !important;
+}
+
+[data-theme='dark'] .bg-orange-50 {
+  background-color: #3f2310 !important;
+}
+
+[data-theme='dark'] .bg-blue-50 {
+  background-color: #10233b !important;
+}
+
+[data-theme='dark'] .bg-red-100,
+[data-theme='dark'] .bg-green-100,
+[data-theme='dark'] .bg-yellow-100,
+[data-theme='dark'] .bg-orange-100,
+[data-theme='dark'] .bg-blue-100 {
+  background-color: color-mix(in oklab, var(--surface-3) 65%, black 35%) !important;
+}
+
+[data-theme='dark'] .border-red-200,
+[data-theme='dark'] .border-green-200,
+[data-theme='dark'] .border-yellow-200,
+[data-theme='dark'] .border-orange-200,
+[data-theme='dark'] .border-blue-200 {
+  border-color: color-mix(in oklab, var(--border-strong) 75%, black 25%) !important;
+}
+
+[data-theme='dark'] .shadow-sm,
+[data-theme='dark'] .shadow-lg,
+[data-theme='dark'] .shadow-xl {
+  box-shadow: 0 14px 34px rgba(2, 8, 23, 0.5) !important;
+}
+
+[data-theme='dark'] .bg-black\/20 {
+  background-color: rgba(2, 6, 23, 0.6) !important;
+}
+
+[data-theme='dark'] .text-white {
+  color: #f8fafc !important;
+}
+
+[data-theme='dark'] .from-green-500,
+[data-theme='dark'] .from-blue-500,
+[data-theme='dark'] .from-red-500 {
+  --tw-gradient-from: color-mix(in oklab, var(--accent) 78%, black) !important;
+}
+
+[data-theme='dark'] .to-green-600,
+[data-theme='dark'] .to-blue-600,
+[data-theme='dark'] .to-red-600 {
+  --tw-gradient-to: color-mix(in oklab, var(--accent) 44%, black) !important;
+}
+
+@media (max-width: 768px) {
+  .text-2xl {
+    line-height: 1.2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

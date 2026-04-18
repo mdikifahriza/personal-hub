@@ -1,0 +1,571 @@
+BEGIN;
+
+-- =========================================================
+-- Extensions
+-- =========================================================
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- =========================================================
+-- Auth: login
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.login (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  password text NOT NULL
+);
+
+ALTER TABLE public.login
+  ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
+
+UPDATE public.login
+SET id = gen_random_uuid()
+WHERE id IS NULL;
+
+ALTER TABLE public.login
+  ALTER COLUMN id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'login_pkey'
+  ) THEN
+    ALTER TABLE public.login
+      ADD CONSTRAINT login_pkey PRIMARY KEY (id);
+  END IF;
+END $$;
+
+INSERT INTO public.login (password)
+SELECT '12345678'
+WHERE NOT EXISTS (SELECT 1 FROM public.login);
+
+-- =========================================================
+-- Files metadata (binary stored in Cloudflare R2)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.files (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_name text NOT NULL,
+  file_size bigint NOT NULL,
+  file_type text,
+  file_path text NOT NULL,
+  storage_path text,
+  bucket_id text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_created_at ON public.files(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_files_bucket_id ON public.files(bucket_id);
+
+-- =========================================================
+-- Tasks and routines
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  priority text NOT NULL DEFAULT 'medium'
+    CHECK (priority IN ('high', 'medium', 'low')),
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'in_progress', 'completed')),
+  due_date date,
+  completed_at timestamptz,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.routines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  time_of_day text NOT NULL,
+  days_of_week integer[] NOT NULL,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.routine_completions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  routine_id uuid NOT NULL REFERENCES public.routines(id) ON DELETE CASCADE,
+  completed_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON public.tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON public.tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON public.tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_routines_is_active ON public.routines(is_active);
+CREATE INDEX IF NOT EXISTS idx_routine_completions_routine_id ON public.routine_completions(routine_id);
+CREATE INDEX IF NOT EXISTS idx_routine_completions_completed_at ON public.routine_completions(completed_at DESC);
+
+-- =========================================================
+-- Notes and passwords
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  content text NOT NULL,
+  color text,
+  is_pinned boolean DEFAULT false,
+  is_archived boolean DEFAULT false,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_pinned ON public.notes(is_pinned DESC);
+CREATE INDEX IF NOT EXISTS idx_notes_archived ON public.notes(is_archived);
+CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON public.notes(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.passwords (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  service text NOT NULL,
+  username text NOT NULL,
+  password text NOT NULL,
+  notes text,
+  strength integer DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_passwords_service ON public.passwords(service);
+CREATE INDEX IF NOT EXISTS idx_passwords_username ON public.passwords(username);
+CREATE INDEX IF NOT EXISTS idx_passwords_created_at ON public.passwords(created_at DESC);
+
+-- Optional seed notes
+INSERT INTO public.notes (title, content, color, is_pinned, is_archived)
+SELECT * FROM (
+  VALUES
+    ('Meeting Notes', 'Discuss roadmap and action items.', '#fef68a', TRUE, FALSE),
+    ('Shopping List', 'Milk, eggs, bread, vegetables, fruits.', '#a7ffeb', FALSE, FALSE)
+) AS v(title, content, color, is_pinned, is_archived)
+WHERE NOT EXISTS (SELECT 1 FROM public.notes);
+
+-- Optional seed passwords
+INSERT INTO public.passwords (service, username, password, notes, strength)
+SELECT * FROM (
+  VALUES
+    ('Gmail', 'diki@gmail.com', 'MySecureP@ss123', 'Primary email account', 85),
+    ('Facebook', 'diki.user', 'Fb2024!Strong', 'Personal social account', 80)
+) AS v(service, username, password, notes, strength)
+WHERE NOT EXISTS (SELECT 1 FROM public.passwords);
+
+-- =========================================================
+-- Finance core
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  type text NOT NULL CHECK (type IN ('cash', 'bank', 'ewallet', 'credit')),
+  currency text DEFAULT 'IDR',
+  initial_balance numeric(15,2) DEFAULT 0,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.categories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  type text NOT NULL CHECK (type IN ('income', 'expense')),
+  icon text DEFAULT '$',
+  color text DEFAULT '#3b82f6',
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  type text NOT NULL CHECK (type IN ('income', 'expense')),
+  amount numeric(15,2) NOT NULL,
+  category_id uuid REFERENCES public.categories(id) ON DELETE CASCADE,
+  account_id uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+  description text,
+  date date NOT NULL,
+  source_type text,
+  source_id uuid,
+  is_auto_generated boolean NOT NULL DEFAULT false,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.transactions
+  ADD COLUMN IF NOT EXISTS source_type text,
+  ADD COLUMN IF NOT EXISTS source_id uuid,
+  ADD COLUMN IF NOT EXISTS is_auto_generated boolean NOT NULL DEFAULT false;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'transactions_source_type_check'
+  ) THEN
+    ALTER TABLE public.transactions
+      ADD CONSTRAINT transactions_source_type_check
+      CHECK (
+        source_type IS NULL
+        OR source_type IN ('task_payment', 'recurring', 'manual')
+      );
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.transfers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_account uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+  to_account uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+  amount numeric(15,2) NOT NULL,
+  transfer_date date NOT NULL,
+  note text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.recurring_transactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+  category_id uuid REFERENCES public.categories(id) ON DELETE CASCADE,
+  type text NOT NULL CHECK (type IN ('income', 'expense')),
+  amount numeric(15,2) NOT NULL,
+  frequency text NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly', 'yearly')),
+  next_run date NOT NULL,
+  description text,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.budgets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  category_id uuid REFERENCES public.categories(id) ON DELETE CASCADE,
+  monthly_limit numeric(15,2) NOT NULL,
+  period text NOT NULL CHECK (period IN ('weekly', 'monthly', 'yearly')),
+  start_date date NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(date DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_account ON public.transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_category ON public.transactions(category_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_source ON public.transactions(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_date ON public.transfers(transfer_date DESC);
+CREATE INDEX IF NOT EXISTS idx_recurring_next_run ON public.recurring_transactions(next_run);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_payment_transaction
+ON public.transactions(source_id)
+WHERE source_type = 'task_payment';
+
+-- =========================================================
+-- Goal and task-finance integration
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.income_goals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL,
+  description text,
+  target_amount numeric(15,2) NOT NULL CHECK (target_amount > 0),
+  cadence text NOT NULL DEFAULT 'custom'
+    CHECK (cadence IN ('daily', 'weekly', 'monthly', 'quarterly', 'custom')),
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT income_goals_date_check CHECK (end_date >= start_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_income_goals_active ON public.income_goals(is_active);
+CREATE INDEX IF NOT EXISTS idx_income_goals_period ON public.income_goals(start_date, end_date);
+
+CREATE TABLE IF NOT EXISTS public.task_finance (
+  task_id uuid PRIMARY KEY REFERENCES public.tasks(id) ON DELETE CASCADE,
+  client_name text,
+  expected_amount numeric(15,2) CHECK (expected_amount IS NULL OR expected_amount >= 0),
+  agreed_amount numeric(15,2) CHECK (agreed_amount IS NULL OR agreed_amount >= 0),
+  invoice_number text,
+  invoice_status text NOT NULL DEFAULT 'not_sent'
+    CHECK (invoice_status IN ('not_sent', 'sent', 'partial', 'paid', 'overdue', 'cancelled')),
+  payment_status text NOT NULL DEFAULT 'unpaid'
+    CHECK (payment_status IN ('unpaid', 'partial', 'paid')),
+  paid_amount numeric(15,2) DEFAULT 0 CHECK (paid_amount >= 0),
+  paid_at timestamptz,
+  account_id uuid REFERENCES public.accounts(id),
+  category_id uuid REFERENCES public.categories(id),
+  auto_create_transaction boolean NOT NULL DEFAULT true,
+  transaction_id uuid UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'task_finance_transaction_id_fkey'
+  ) THEN
+    ALTER TABLE public.task_finance
+      ADD CONSTRAINT task_finance_transaction_id_fkey
+      FOREIGN KEY (transaction_id) REFERENCES public.transactions(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_task_finance_payment_status ON public.task_finance(payment_status);
+CREATE INDEX IF NOT EXISTS idx_task_finance_invoice_status ON public.task_finance(invoice_status);
+CREATE INDEX IF NOT EXISTS idx_task_finance_account_id ON public.task_finance(account_id);
+CREATE INDEX IF NOT EXISTS idx_task_finance_category_id ON public.task_finance(category_id);
+
+CREATE TABLE IF NOT EXISTS public.task_reminders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+  reminder_type text NOT NULL
+    CHECK (reminder_type IN ('due_date', 'invoice_follow_up', 'payment_follow_up', 'custom')),
+  remind_at timestamptz NOT NULL,
+  note text,
+  is_done boolean NOT NULL DEFAULT false,
+  done_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_reminders_due
+ON public.task_reminders(remind_at)
+WHERE is_done = false;
+
+CREATE INDEX IF NOT EXISTS idx_task_reminders_task_id ON public.task_reminders(task_id);
+
+-- =========================================================
+-- Seed base data
+-- =========================================================
+INSERT INTO public.accounts (name, type, initial_balance, is_active)
+SELECT * FROM (
+  VALUES
+    ('Dompet', 'cash', 500000, TRUE),
+    ('BCA', 'bank', 5000000, TRUE),
+    ('GoPay', 'ewallet', 200000, TRUE)
+) AS v(name, type, initial_balance, is_active)
+WHERE NOT EXISTS (SELECT 1 FROM public.accounts);
+
+INSERT INTO public.categories (name, type, icon, color)
+SELECT * FROM (
+  VALUES
+    ('Gaji', 'income', '$', '#10b981'),
+    ('Freelance', 'income', 'F', '#3b82f6'),
+    ('Makan', 'expense', 'M', '#ef4444'),
+    ('Transport', 'expense', 'T', '#f59e0b'),
+    ('Belanja', 'expense', 'B', '#8b5cf6'),
+    ('Hiburan', 'expense', 'H', '#ec4899')
+) AS v(name, type, icon, color)
+WHERE NOT EXISTS (SELECT 1 FROM public.categories);
+
+INSERT INTO public.categories (name, type, icon, color)
+SELECT 'Task Payment', 'income', 'TP', '#10b981'
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM public.categories
+  WHERE lower(name) = 'task payment' AND type = 'income'
+);
+
+DO $$
+DECLARE
+  v_gaji_id uuid;
+  v_makan_id uuid;
+  v_transport_id uuid;
+  v_bca_id uuid;
+  v_dompet_id uuid;
+  v_gopay_id uuid;
+BEGIN
+  SELECT id INTO v_gaji_id FROM public.categories WHERE name = 'Gaji' LIMIT 1;
+  SELECT id INTO v_makan_id FROM public.categories WHERE name = 'Makan' LIMIT 1;
+  SELECT id INTO v_transport_id FROM public.categories WHERE name = 'Transport' LIMIT 1;
+
+  SELECT id INTO v_bca_id FROM public.accounts WHERE name = 'BCA' LIMIT 1;
+  SELECT id INTO v_dompet_id FROM public.accounts WHERE name = 'Dompet' LIMIT 1;
+  SELECT id INTO v_gopay_id FROM public.accounts WHERE name = 'GoPay' LIMIT 1;
+
+  IF NOT EXISTS (SELECT 1 FROM public.transactions) THEN
+    INSERT INTO public.transactions (type, amount, category_id, account_id, description, date)
+    VALUES
+      ('income', 5000000, v_gaji_id, v_bca_id, 'Gaji bulan ini', CURRENT_DATE),
+      ('expense', 50000, v_makan_id, v_dompet_id, 'Makan siang', CURRENT_DATE),
+      ('expense', 25000, v_transport_id, v_gopay_id, 'Ojek online', CURRENT_DATE - 1);
+  END IF;
+END $$;
+
+-- =========================================================
+-- RPC: mark task as paid and create linked income transaction
+-- =========================================================
+DROP FUNCTION IF EXISTS public.mark_task_as_paid(uuid, numeric, date, uuid, uuid, text);
+
+CREATE OR REPLACE FUNCTION public.mark_task_as_paid(
+  p_task_id uuid,
+  p_paid_amount numeric,
+  p_paid_date date DEFAULT CURRENT_DATE,
+  p_account_id uuid DEFAULT NULL,
+  p_category_id uuid DEFAULT NULL,
+  p_description text DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+AS $func$
+DECLARE
+  v_task_title text;
+  v_existing_tx_id uuid;
+  v_tx_id uuid;
+  v_account_id uuid;
+  v_category_id uuid;
+BEGIN
+  IF p_paid_amount IS NULL OR p_paid_amount <= 0 THEN
+    RAISE EXCEPTION 'p_paid_amount must be > 0';
+  END IF;
+
+  SELECT t.title
+  INTO v_task_title
+  FROM public.tasks t
+  WHERE t.id = p_task_id;
+
+  IF v_task_title IS NULL THEN
+    RAISE EXCEPTION 'Task % not found', p_task_id;
+  END IF;
+
+  SELECT tr.id
+  INTO v_existing_tx_id
+  FROM public.transactions tr
+  WHERE tr.source_type = 'task_payment'
+    AND tr.source_id = p_task_id
+  LIMIT 1;
+
+  IF v_existing_tx_id IS NOT NULL THEN
+    RETURN v_existing_tx_id;
+  END IF;
+
+  SELECT COALESCE(p_account_id, tf.account_id)
+  INTO v_account_id
+  FROM public.task_finance tf
+  WHERE tf.task_id = p_task_id;
+
+  IF v_account_id IS NULL THEN
+    SELECT a.id
+    INTO v_account_id
+    FROM public.accounts a
+    WHERE a.is_active = true
+    ORDER BY a.created_at
+    LIMIT 1;
+  END IF;
+
+  IF v_account_id IS NULL THEN
+    RAISE EXCEPTION 'No active account available for task payment';
+  END IF;
+
+  SELECT COALESCE(p_category_id, tf.category_id)
+  INTO v_category_id
+  FROM public.task_finance tf
+  WHERE tf.task_id = p_task_id;
+
+  IF v_category_id IS NULL THEN
+    SELECT c.id
+    INTO v_category_id
+    FROM public.categories c
+    WHERE c.type = 'income' AND lower(c.name) = 'task payment'
+    LIMIT 1;
+  END IF;
+
+  IF v_category_id IS NULL THEN
+    SELECT c.id
+    INTO v_category_id
+    FROM public.categories c
+    WHERE c.type = 'income'
+    ORDER BY c.created_at
+    LIMIT 1;
+  END IF;
+
+  IF v_category_id IS NULL THEN
+    RAISE EXCEPTION 'No income category available';
+  END IF;
+
+  INSERT INTO public.transactions (
+    type,
+    amount,
+    category_id,
+    account_id,
+    description,
+    date,
+    source_type,
+    source_id,
+    is_auto_generated
+  ) VALUES (
+    'income',
+    p_paid_amount,
+    v_category_id,
+    v_account_id,
+    COALESCE(p_description, format('Task payment: %s', v_task_title)),
+    p_paid_date,
+    'task_payment',
+    p_task_id,
+    true
+  )
+  RETURNING id INTO v_tx_id;
+
+  INSERT INTO public.task_finance (
+    task_id,
+    agreed_amount,
+    paid_amount,
+    paid_at,
+    payment_status,
+    invoice_status,
+    account_id,
+    category_id,
+    transaction_id,
+    updated_at
+  ) VALUES (
+    p_task_id,
+    p_paid_amount,
+    p_paid_amount,
+    now(),
+    'paid',
+    'paid',
+    v_account_id,
+    v_category_id,
+    v_tx_id,
+    now()
+  )
+  ON CONFLICT (task_id) DO UPDATE
+  SET
+    agreed_amount = COALESCE(public.task_finance.agreed_amount, EXCLUDED.agreed_amount),
+    paid_amount = EXCLUDED.paid_amount,
+    paid_at = EXCLUDED.paid_at,
+    payment_status = 'paid',
+    invoice_status = 'paid',
+    account_id = COALESCE(public.task_finance.account_id, EXCLUDED.account_id),
+    category_id = COALESCE(public.task_finance.category_id, EXCLUDED.category_id),
+    transaction_id = EXCLUDED.transaction_id,
+    updated_at = now();
+
+  UPDATE public.tasks
+  SET
+    status = 'completed',
+    completed_at = COALESCE(completed_at, now())
+  WHERE id = p_task_id;
+
+  RETURN v_tx_id;
+END;
+$func$;
+
+-- =========================================================
+-- View: income goal progress
+-- =========================================================
+CREATE OR REPLACE VIEW public.v_income_goal_progress AS
+SELECT
+  g.id,
+  g.title,
+  g.description,
+  g.cadence,
+  g.target_amount,
+  g.start_date,
+  g.end_date,
+  g.is_active,
+  COALESCE(SUM(t.amount), 0)::numeric(15,2) AS achieved_amount,
+  GREATEST(g.target_amount - COALESCE(SUM(t.amount), 0), 0)::numeric(15,2) AS remaining_amount,
+  CASE
+    WHEN g.target_amount <= 0 THEN 0
+    ELSE ROUND((COALESCE(SUM(t.amount), 0) / g.target_amount) * 100, 2)
+  END AS progress_percent
+FROM public.income_goals g
+LEFT JOIN public.transactions t
+  ON t.type = 'income'
+  AND t.date >= g.start_date
+  AND t.date <= g.end_date
+GROUP BY g.id;
+
+COMMIT;
+
